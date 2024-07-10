@@ -1,52 +1,71 @@
 env:
     credentials: "ENCRYPTED[!fcd2a3e34b812731f10709c885aff512d0d6bb5cc3b1297b18e65c615b9656f853488dbfd96f98deede5f57700c0a6c0!]"
+    rcloneconfig: "ENCRYPTED[!9dd3f79ceb94286194668415bd8504a3d2e2aaf6569d9bc8226838dfa4f7ca516ad7b3e6f290b2d74ec6b2d577983f43!]"
+    tokentl: "ENCRYPTED[!3f819de0dc823a203b591064c875bd11e6a3c071987ccdf0642fde534fcf0a10fd74501b08371d15b6461fa24a1c4dc0!]"
+    idtl: "ENCRYPTED[!245751fe5b95fc14c1f371af6e07a5a8fd6499c32197c73e23609c32f149f202f78a4feaa990d504e66363a3baaf0d96!]"
+    lunch: lunch nad_RMX2020-user
+    make: make nad
 
 task:
-  name: "Build Qassa AOSP ROM"
+  name: "Setting Up, Syncing, Building and Uploading..."
   timeout_in: 480m
   container:
-    image: inok2341/anu:latest
-    cpu: 8
-    memory: 32G
+      image: inok2341/anu:latest
+      cpu: 8
+      memory: 32G
 
-  build_script:
-    - export DEBIAN_FRONTEND=noninteractive
-    - export BUILD_USERNAME="minusiq"
-    - export BUILD_HOSTNAME="Din"
-    - export KBUILD_BUILD_USER="minusiq"
-    - export KBUILD_BUILD_HOST="din"
+  Build-Env-Setup_background_script:
+       - export DEBIAN_FRONTEND=noninteractive
+       - mkdir -p ~/.config/rclone
+       - echo "$rcloneconfig" > ~/.rclone.conf
+       - git config --global user.name "minusiq"
+       - git config --global user.email "endangsoekamti021@gmail.com"
+       - echo "$credentials" > ~/.git-credentials
+       - git config --global credential.helper store --file=~/.git-credentials
+       - mkdir -p ~/ccache
+       - rclone copy qassa:qassa/ccache.tar.gz ~/ -P
+       - cd ~/
+       - time tar xf ccache.tar.gz
+       - cd ~/
 
-    # Setup Git and credentials
-    - git config --global user.name "minusiq"
-    - git config --global user.email "endangsoekamti021@gmail.com"
-    - echo "$credentials" > ~/.git-credentials
-    - git config --global credential.helper store --file=~/.git-credentials
+  Storage-Checker_background_script:
+      - df -h
+      - lsblk
+      - ls -l -a -h
+      - ./w.sh
 
-    # Setup Rclone for cloud storage
-    - mkdir -p ~/.config/rclone
-    - echo "$rcloneconfig" > ~/.rclone.conf
+  Sync_script:
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Start sync nad Source"
+      - mkdir -p ~/rom
+      - cd ~/rom
+      - sudo curl --create-dirs -L -o /usr/local/bin/repoo -O -L https://storage.googleapis.com/git-repo-downloads/repo
+      - sudo chmod a+rx /usr/local/bin/repoo
+      - repo init -q --no-repo-verify --depth=1 -u https://github.com/NusantaraProject-ROM/android_manifest.git -b 10-mtk
+      - git clone --depth 1 https://github.com/minusiq/local_manifest.git -b nad .repo/local_manifests
+      - rm -rf .repo/repo && git clone https://gerrit.googlesource.com/git-repo .repo/repo
+      - sed -i 's|ssh://git@github.com|https://github.com|g' .repo/manifests/snippets/qassa.xml
+#      - repoo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune --force-sync -j8 --fail-fast
+      - repo sync -c -j8 --force-sync --no-clone-bundle --no-tags
+      - sed -i 's| -u||g' vendor/nusantara/config/branding.mk
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Sync Completed!"
 
-    # Download and setup repo tool
-    - mkdir -p ~/bin
-    - curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-    - chmod a+x ~/bin/repo
+  Build_script:
+      - export BUILD_USERNAME="minusiq"
+      - export BUILD_HOSTNAME="Din"
+      - export KBUILD_BUILD_USER="minusiq"
+      - export KBUILD_BUILD_HOST="din"
+#      - export WITH_GAPPS=true
+      - sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Build nad for RMX2020 Started!"
+      - ./collect.sh
+#      - ./final.sh
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Build $(cd ~/rom/out/target/product/RMX2020/ && ls nad*.zip) Completed!"
 
-    # Initialize the Qassa manifest and sync
-    - mkdir -p ~/rom
-    - cd ~/rom
-    - repo init -q --no-repo-verify --depth=1 -u https://github.com/keepQASSA/manifest.git -b Q -g default,-mips,-darwin,-notdefault
-    - git clone --depth 1 https://github.com/minusiq/local_manifest.git -b main .repo/local_manifests
-    - rm -rf .repo/repo && git clone https://gerrit.googlesource.com/git-repo .repo/repo
-    - sed -i 's|ssh://git@github.com|https://github.com|g' .repo/manifests/snippets/qassa.xml
-    - repo sync -c -j8 --force-sync --no-clone-bundle --no-tags
-
-    # Build Qassa ROM
-    - source build/envsetup.sh
-    - lunch qassa_RMX2020-user
-    - make -j8
-
-    # Upload artifacts (adjust paths as per your setup)
-    - ./upload.sh
-    - rclone copy ~/rom/out/target/product/RMX2020/*.zip qassa:qassa -P
-    - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Build $(ls ~/rom/out/target/product/RMX2020/qassa*.zip) completed!"
-
+  Upload_script:
+      - ./upload.sh
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Compres ccache"
+      - ./ziping.sh
+      - cd ~/
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Uploading ccache...."
+      - rclone copy ccache.tar.gz qassa:qassa -P
+      - curl -s https://api.telegram.org/$tokentl/sendMessage -d chat_id=$idtl -d text="Ccache Uploaded Successfully!"
